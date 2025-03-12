@@ -1,5 +1,5 @@
 """
-Azure OpenAI LLM integration for the MultiAgentic RAG system.
+Azure OpenAI LLM integration for the Agentic RAG system.
 """
 import logging
 from typing import Dict, Any, Optional, List
@@ -21,7 +21,7 @@ def get_azure_chat_model(
     model_type: str = "gpt4",
     temperature: float = 0,
     streaming: bool = True,
-    config_path: str = "config-databricks.yaml"
+    config_path: str = "config.yaml"
 ) -> BaseChatModel:
     """
     Get an Azure OpenAI chat model.
@@ -62,7 +62,7 @@ def get_azure_chat_model(
         logger.error(f"Error creating Azure OpenAI chat model: {e}")
         raise RuntimeError(f"Error creating Azure OpenAI chat model: {e}")
 
-def get_azure_embeddings(config_path: str = "config-databricks.yaml") -> Any:
+def get_azure_embeddings(config_path: str = "config.yaml") -> Any:
     """
     Get Azure OpenAI embeddings.
     

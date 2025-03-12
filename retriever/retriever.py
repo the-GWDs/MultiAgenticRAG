@@ -1,140 +1,212 @@
-from docling.document_converter import DocumentConverter
-from langchain_text_splitters import MarkdownHeaderTextSplitter
-from utils.utils import config
-
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
-from langchain.retrievers import EnsembleRetriever, BM25Retriever
-from typing import List, Any
+"""
+Databricks-specific retriever implementation using Azure Document Intelligence and Databricks Vector Search.
+"""
 import logging
-import os
-from dotenv import load_dotenv
-import rank_bm25
+from typing import List, Any, Tuple, Dict, Optional
 
-load_dotenv()
+# LangChain imports
+from langchain_core.documents import Document
+from langchain.retrievers import EnsembleRetriever, BM25Retriever
+from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
+from langchain_cohere import CohereRerank
 
+# Azure OpenAI imports
+from langchain_azure_openai import AzureOpenAIEmbeddings
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Databricks utilities
+from utils.databricks_utils import (
+    load_databricks_config,
+    process_document_with_azure,
+    create_vector_search_index,
+    query_vector_search
+)
+
+# Configure logging
 logger = logging.getLogger(__name__)
 
-
-class DocumentProcessor:
+class DatabricksIndexBuilder:
     """
-    Handles document conversion and splitting.
+    Handles document processing and indexing using Azure Document Intelligence and Databricks Vector Search.
     """
-    def __init__(self, headers_to_split_on: List[str]):
-        self.headers_to_split_on = headers_to_split_on
-
-    def process(self, source: Any) -> List[str]:
+    def __init__(
+        self, 
+        document_path: str, 
+        headers_to_split_on: List[Tuple[str, str]],
+        load_documents: bool = False,
+        config_path: str = "config.yaml"
+    ):
         """
-        Converts a document to markdown and splits it into chunks.
-
+        Initialize the Databricks index builder.
+        
         Args:
-            source (Any): The source document to process.
-
-        Returns:
-            List[str]: List of document sections split by headers.
+            document_path (str): Path to the document to process.
+            headers_to_split_on (List[Tuple[str, str]]): Headers to split the document on.
+            load_documents (bool): Whether to load and process documents.
+            config_path (str): Path to the configuration file.
+        """
+        self.document_path = document_path
+        self.headers_to_split_on = headers_to_split_on
+        self.load_documents = load_documents
+        self.config = load_databricks_config(config_path)
+        
+        # Initialize components
+        self.docs_list = []
+        self.vectorstore_retriever = None
+        self.bm25_retriever = None
+        self.ensemble_retriever = None
+        
+        # Process documents if required
+        if self.load_documents:
+            self.process_documents()
+            self.build_vector_search_index()
+        
+        # Build retrievers
+        self.build_retrievers()
+    
+    def process_documents(self) -> None:
+        """
+        Process documents using Azure Document Intelligence.
         """
         try:
-            logger.info("Starting document processing.")
-            converter = DocumentConverter()
-            markdown_document = converter.convert(source).document.export_to_markdown()
-            markdown_splitter = MarkdownHeaderTextSplitter(self.headers_to_split_on)
-            docs_list = markdown_splitter.split_text(markdown_document)
-            logger.info("Document processed successfully.")
-            return docs_list
+            logger.info(f"Processing document: {self.document_path}")
+            self.docs_list = process_document_with_azure(
+                document_path=self.document_path,
+                config=self.config,
+                headers_to_split_on=self.headers_to_split_on
+            )
+            logger.info(f"Document processed successfully, created {len(self.docs_list)} chunks")
         except Exception as e:
             logger.error(f"Error processing document: {e}")
             raise RuntimeError(f"Error processing document: {e}")
-
-
-class IndexBuilder:
-    """
-    Builds vector-based and BM25-based retrievers.
-    """
-    def __init__(self, docs_list: List[str], collection_name: str, persist_directory: str, load_documents: bool):
-        self.docs_list = docs_list
-        self.collection_name = collection_name
-        self.vectorstore = None
-        self.persist_directory = persist_directory
-        self.load_documents = load_documents
-
-    def build_vectorstore(self):
+    
+    def build_vector_search_index(self) -> None:
         """
-        Initializes the Chroma vectorstore with the provided documents and embeddings.
+        Build a vector search index in Databricks.
         """
-        embeddings = OpenAIEmbeddings()
         try:
-            logger.info("Building vectorstore.")
-            self.vectorstore = Chroma.from_documents(
-                persist_directory=self.persist_directory,
+            logger.info("Building vector search index")
+            
+            # Create Azure OpenAI embeddings
+            embeddings = AzureOpenAIEmbeddings(
+                azure_deployment=self.config["azure_openai"]["deployment_name_embeddings"],
+                azure_endpoint=self.config["azure_openai"]["endpoint"],
+                api_version=self.config["azure_openai"]["api_version"]
+            )
+            
+            # Create vector search index
+            create_vector_search_index(
+                config=self.config,
                 documents=self.docs_list,
-                collection_name=self.collection_name,
-                embedding=embeddings,
-            )         
-            logger.info("Vectorstore built successfully.")
+                embeddings_function=embeddings
+            )
+            
+            logger.info("Vector search index built successfully")
         except Exception as e:
-            logger.error(f"Error building vectorstore: {e}")
-            raise RuntimeError(f"Error building vectorstore: {e}")
-
-    def build_retrievers(self):
+            logger.error(f"Error building vector search index: {e}")
+            raise RuntimeError(f"Error building vector search index: {e}")
+    
+    def build_retrievers(self) -> None:
         """
-        Builds BM25 and vector-based retrievers and combines them into an ensemble retriever.
-
-        Returns:
-            EnsembleRetriever: Combined retriever using BM25 and vector-based methods.
+        Build retrievers for document retrieval.
         """
         try:
-            logger.info("Building BM25 retriever.")
-            bm25_retriever = BM25Retriever.from_documents(self.docs_list, search_kwargs={"k": 4})
-
-            logger.info("Building vector-based retrievers.")
-            retriever_vanilla = self.vectorstore.as_retriever(
-                search_type="similarity", search_kwargs={"k": 4}
+            logger.info("Building retrievers")
+            
+            # Create Azure OpenAI embeddings
+            embeddings = AzureOpenAIEmbeddings(
+                azure_deployment=self.config["azure_openai"]["deployment_name_embeddings"],
+                azure_endpoint=self.config["azure_openai"]["endpoint"],
+                api_version=self.config["azure_openai"]["api_version"]
             )
-            retriever_mmr = self.vectorstore.as_retriever(
-                search_type="mmr", search_kwargs={"k": 4}
-            )
-
-            logger.info("Combining retrievers into an ensemble retriever.")
-            ensemble_retriever = EnsembleRetriever(
-                retrievers=[retriever_vanilla, retriever_mmr, bm25_retriever],
-                weights=[0.3, 0.3, 0.4],
-            )
-            logger.info("Retrievers built successfully.")
-            return ensemble_retriever
+            
+            # Create vector search retriever
+            self.vectorstore_retriever = self._create_vector_search_retriever(embeddings)
+            
+            # Create BM25 retriever if documents are available
+            if self.docs_list:
+                self.bm25_retriever = BM25Retriever.from_documents(self.docs_list)
+                self.bm25_retriever.k = self.config["retriever"]["top_k"]
+            
+            # Create ensemble retriever if both retrievers are available
+            if self.vectorstore_retriever and self.bm25_retriever:
+                weights = self.config["retriever"]["ensemble_weights"]
+                self.ensemble_retriever = EnsembleRetriever(
+                    retrievers=[self.vectorstore_retriever, self.bm25_retriever],
+                    weights=weights[:2]  # Use only the first two weights for these retrievers
+                )
+                
+                # Create compression retriever with Cohere reranking
+                self._create_compression_retriever()
+            
+            logger.info("Retrievers built successfully")
         except Exception as e:
             logger.error(f"Error building retrievers: {e}")
             raise RuntimeError(f"Error building retrievers: {e}")
-
-
-if __name__ == "__main__":
-    # Configuration
-    headers_to_split_on = config["retriever"]["headers_to_split_on"]
-    filepath = config["retriever"]["file"]
-    collection_name = config["retriever"]["collection_name"]
-    load_documents = config["retriever"]["load_documents"]
-
-    print("Retriever entry")
-    if load_documents:
-        # Document Processing
-        logger.info("Initializing document processor.")
-        processor = DocumentProcessor(headers_to_split_on)  # Replace with actual source
-        try:        
-            docs_list = processor.process(filepath)    
-            logger.info(f"{len(docs_list)} chunks generated.") 
-        except RuntimeError as e:        
-            logger.info(f"Failed to process document: {e}")        
-            exit(1)
-
-    # Index Building
-    logger.info("Initializing index builder.")
-    index_builder = IndexBuilder(docs_list, collection_name, persist_directory="vector_db", load_documents=load_documents)
-    index_builder.build_vectorstore()
-
-    try:
-        ensemble_retriever = index_builder.build_retrievers()
-        logger.info("Index and retrievers built successfully. Ready for use.")
-    except RuntimeError as e:
-        logger.critical(f"Failed to build index or retrievers: {e}")
-        exit(1)
+    
+    def _create_vector_search_retriever(self, embeddings: Any) -> Any:
+        """
+        Create a retriever that uses Databricks Vector Search.
+        
+        Args:
+            embeddings (Any): The embeddings function to use.
+            
+        Returns:
+            Any: The vector search retriever.
+        """
+        class DatabricksVectorSearchRetriever:
+            def __init__(self, config, embeddings_function, top_k=3):
+                self.config = config
+                self.embeddings_function = embeddings_function
+                self.top_k = top_k
+            
+            def get_relevant_documents(self, query: str) -> List[Document]:
+                return query_vector_search(
+                    config=self.config,
+                    query=query,
+                    embeddings_function=self.embeddings_function,
+                    top_k=self.top_k
+                )
+        
+        return DatabricksVectorSearchRetriever(
+            config=self.config,
+            embeddings_function=embeddings,
+            top_k=self.config["retriever"]["top_k"]
+        )
+    
+    def _create_compression_retriever(self) -> None:
+        """
+        Create a compression retriever with Cohere reranking.
+        """
+        try:
+            # Create Cohere reranker
+            compressor = CohereRerank(
+                model=self.config["retriever"]["cohere_rerank_model"],
+                top_n=self.config["retriever"]["top_k_compression"]
+            )
+            
+            # Create compression retriever
+            self.compression_retriever = ContextualCompressionRetriever(
+                base_compressor=compressor,
+                base_retriever=self.ensemble_retriever
+            )
+            
+            logger.info("Compression retriever created successfully")
+        except Exception as e:
+            logger.error(f"Error creating compression retriever: {e}")
+            raise RuntimeError(f"Error creating compression retriever: {e}")
+    
+    def get_retriever(self) -> Any:
+        """
+        Get the best available retriever.
+        
+        Returns:
+            Any: The retriever to use.
+        """
+        if hasattr(self, "compression_retriever") and self.compression_retriever:
+            return self.compression_retriever
+        elif self.ensemble_retriever:
+            return self.ensemble_retriever
+        elif self.vectorstore_retriever:
+            return self.vectorstore_retriever
+        else:
+            raise RuntimeError("No retriever available") 

@@ -1,9 +1,16 @@
-rank_bm25
-rank-llm==0.12.8
-chromadb
+# Databricks-specific requirements
+databricks-vectorsearch
+azure-ai-documentintelligence
+azure-identity
+azure-keyvault-secrets
+azure-openai
 langchain
 langchain-core
 langchain-community
-langchain-openai
-chromadb 
-langchain_cohere
+langchain-databricks
+langchain-experimental
+rank_bm25
+rank-llm==0.12.8
+langgraph
+pydantic
+pyyaml 

@@ -47,12 +47,12 @@ def _setup_vectorstore() -> Chroma:
 
 
 
-def _load_documents(vectorstore: Chroma) -> list[Document]:
+def _load_documents(vectorstore: dbx_vectorstore) -> list[Document]:
     """
     Load documents and metadata from the vector store and return them as Langchain Document objects.
 
     Args:
-        vectorstore (Chroma): The vector store instance.
+        vectorstore (databticks): The vector store instance.
 
     Returns:
         list[Document]: A list of Document objects containing the content and metadata.
@@ -73,14 +73,14 @@ def _load_documents(vectorstore: Chroma) -> list[Document]:
 
 
 
-def _build_retrievers(documents: list[Document], vectorstore: Chroma) -> ContextualCompressionRetriever:
+def _build_retrievers(documents: list[Document], vectorstore: dbx_vectorstore) -> ContextualCompressionRetriever:
     """
     Build and return a compression retriever that includes
     an ensemble retriever and Cohere-based contextual compression.
 
     Args:
         documents (list[Document]): List of Document objects.
-        vectorstore (Chroma): The vector store to use for building retrievers.
+        vectorstore (databricks): The vector store to use for building retrievers.
 
     Returns:
         ContextualCompressionRetriever: A compression retriever that can be used to fetch and re-rank documents.
@@ -134,7 +134,7 @@ async def generate_queries(
         queries: list[str]
 
     logger.info("---GENERATE QUERIES---")
-    model = ChatOpenAI(model="gpt-4o-mini-2024-07-18", temperature=0)
+    model = AzureOpenAI(model="gpt-4o-2024-07-18", temperature=0)
     messages = [
         {"role": "system", "content": GENERATE_QUERIES_SYSTEM_PROMPT},
         {"role": "human", "content": state.question},
@@ -186,7 +186,6 @@ def retrieve_in_parallel(state: ResearcherState) -> list[Send]:
     return [
         Send("retrieve_and_rerank_documents", QueryState(query=query)) for query in state.queries
     ]
-
 
 
 builder = StateGraph(ResearcherState)

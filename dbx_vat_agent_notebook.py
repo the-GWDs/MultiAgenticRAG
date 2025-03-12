@@ -1,8 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # MultiAgentic RAG System on Databricks
+# MAGIC # Agentic RAG System on Databricks
 # MAGIC 
-# MAGIC This notebook demonstrates how to run the MultiAgentic RAG system on Databricks using Azure services.
+# MAGIC This notebook demonstrates how to run the Agentic RAG system on Databricks using Azure services.
 # MAGIC 
 # MAGIC ## Setup
 # MAGIC 
@@ -10,7 +10,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install -r requirements-databricks.txt
+# MAGIC %pip install -r requirements.txt
 
 # COMMAND ----------
 
@@ -27,44 +27,43 @@ import os
 # Define configuration
 config = {
     "retriever": {
-        "file": "retriever/google-2024-environmental-report.pdf",
+        "file": "retriever/Umsatzsteuerrichtlinien.pdf",
         "headers_to_split_on": [
             ["#", "Header 1"],
             ["##", "Header 2"]
         ],
         "load_documents": True,
-        "vector_search_endpoint_name": "rag_vector_search",
-        "vector_index_name": "rag_vector_index",
+        "vector_search_endpoint_name": "vat_vector_search",
+        "vector_index_name": "vat_vector_index",
         "vector_dimension": 1536,
         "top_k": 3,
         "top_k_compression": 3,
-        "ensemble_weights": [0.3, 0.3, 0.4],
-        "cohere_rerank_model": "rerank-english-v3.0"
+        "ensemble_weights": [0.3, 0.3, 0.4], # some defatuls: 0.3,0.3,0.4
+        "rerank_model": "rerank-german"
     },
     "document_intelligence": {
-        "endpoint": dbutils.secrets.get("rag-scope", "document-intelligence-endpoint"),
-        "key": dbutils.secrets.get("rag-scope", "document-intelligence-key")
+        "endpoint": dbutils.secrets.get("key-vault", "document-intelligence-endpoint"),
+        "key": dbutils.secrets.get("key-vault", "document-intelligence-key")
     },
     "azure_openai": {
         "api_version": "2023-05-15",
-        "endpoint": dbutils.secrets.get("rag-scope", "azure-openai-endpoint"),
+        "endpoint": dbutils.secrets.get("key-vault", "azure-openai-endpoint"),
         "deployment_name_gpt4": "gpt-4o",
-        "deployment_name_gpt4_mini": "gpt-4o-mini",
         "deployment_name_embeddings": "text-embedding-ada-002",
         "temperature": 0
     },
     "databricks": {
         "workspace_url": dbutils.notebook.entry_point.getDbutils().notebook().getContext().browserHostName().get(),
-        "catalog": "rag_catalog",
-        "schema": "rag_schema"
+        "catalog": "vat_catalog",
+        "schema": "vat_schhema"
     }
 }
 
 # Save configuration to file
-with open("config-databricks.yaml", "w") as f:
+with open("config.yaml", "w") as f:
     yaml.dump(config, f)
 
-print("Configuration saved to config-databricks.yaml")
+print("Configuration saved to config.yaml")
 
 # COMMAND ----------
 
@@ -77,16 +76,16 @@ print("Configuration saved to config-databricks.yaml")
 
 # MAGIC %sql
 # MAGIC -- Create catalog if it doesn't exist
-# MAGIC CREATE CATALOG IF NOT EXISTS rag_catalog;
+# MAGIC CREATE CATALOG IF NOT EXISTS vat_catalog;
 # MAGIC 
 # MAGIC -- Use the catalog
-# MAGIC USE CATALOG rag_catalog;
+# MAGIC USE CATALOG vat_catalog;
 # MAGIC 
 # MAGIC -- Create schema if it doesn't exist
-# MAGIC CREATE SCHEMA IF NOT EXISTS rag_schema;
+# MAGIC CREATE SCHEMA IF NOT EXISTS vat_schema;
 # MAGIC 
 # MAGIC -- Use the schema
-# MAGIC USE SCHEMA rag_schema;
+# MAGIC USE SCHEMA vat_schema;
 # MAGIC 
 # MAGIC -- Create documents table if it doesn't exist
 # MAGIC CREATE TABLE IF NOT EXISTS documents (
@@ -101,13 +100,13 @@ print("Configuration saved to config-databricks.yaml")
 # MAGIC %md
 # MAGIC ## Initialize the System
 # MAGIC 
-# MAGIC Now, let's initialize the MultiAgentic RAG system:
+# MAGIC Now, let's initialize the Agentic RAG system:
 
 # COMMAND ----------
 
 import logging
 import asyncio
-from retriever.databricks_retriever import DatabricksIndexBuilder
+from retriever.retriever import DatabricksIndexBuilder
 from utils.databricks_utils import load_databricks_config
 from utils.azure_llm import get_azure_embeddings
 
@@ -158,13 +157,13 @@ print("System initialized successfully")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Run the MultiAgentic RAG System
+# MAGIC ## Run the Agentic RAG System
 # MAGIC 
 # MAGIC Now, let's run the system with a sample query:
 
 # COMMAND ----------
 
-from app_databricks import process_query
+from app import process_query
 
 # Define a query
 query = "What are Google's carbon emissions goals?"

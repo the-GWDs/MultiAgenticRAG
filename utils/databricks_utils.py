@@ -1,5 +1,5 @@
 """
-Databricks-specific utilities for the MultiAgentic RAG system.
+Databricks-specific utilities for the Agentic RAG system.
 """
 import os
 import yaml
@@ -24,7 +24,7 @@ from langchain.text_splitter import MarkdownHeaderTextSplitter
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def load_databricks_config(config_path: str = "config-databricks.yaml") -> Dict[str, Any]:
+def load_databricks_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     """
     Load the Databricks-specific configuration from the YAML file.
     
